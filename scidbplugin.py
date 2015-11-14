@@ -6,15 +6,15 @@ from starcluster.clustersetup import DefaultClusterSetup
 from starcluster.exception import RemoteCommandFailed
 from starcluster.logger import log
 
-SCIDB_VERSION = 14.8
+SCIDB_VERSION = 15.7
 SCIDB_REVISION = 8628
 POSTGRES_VERSION = '9.1'
-#SCIDB_INSTALL_PATH = '/opt/scidb/$SCIDB_VER'
+SCIDB_INSTALL_PATH = '/opt/scidb/$SCIDB_VER'
 
 DEFAULT_USERNAME = 'scidb'
-DEFAULT_REPOSITORY = 'https://github.com/BrandonHaynes/scidb.git'
+DEFAULT_REPOSITORY = 'https://github.com/suhailrehman/scidb.git'
 DEFAULT_BRANCH = None
-DEFAULT_SHIM_PACKAGE_URI = 'https://paradigm4.github.io/shim/shim_14.8_amd64.deb'
+DEFAULT_SHIM_PACKAGE_URI = 'http://paradigm4.github.io/shim/ubuntu_14.04_shim_15.7_amd64.deb'
 DEFAULT_DIRECTORY = '/mnt/scidb'
 DEFAULT_CLIENTS = '0.0.0.0/0'
 DEFAULT_BUILD_TYPE = 'RelWithDebInfo'
@@ -130,6 +130,7 @@ class SciDBInstaller(DefaultClusterSetup):
         log.info('4.4 Coordinator')
         self._add_swapfile(master)
         self._execute(master, 'deployment/deploy.sh prepare_coordinator {}'.format(master.alias))
+        self._execute(master, 'deployment/deploy.sh prepare_chroot {} {}'.format(self.username, master.alias))
 
         log.info('End SciDB node configuration')
 
@@ -150,37 +151,38 @@ class SciDBInstaller(DefaultClusterSetup):
 
         log.info('6.2 Build')
         #TODO can probably remove now that we've committed revision
-        self._ensure_revision(master)
+        #self._ensure_revision(master)
         log.info('    * Setup')
         self._execute(master, 'su scidb -c "./run.py setup -f"')
         log.info('    * Build')
-        self._execute(master, 'su scidb -c "./run.py make -j{}"'.format(self.build_threads))
+        self._execute(master, 'su scidb -c "./run.py build_fast /tmp/packages -f"')
+        #self._execute(master, 'su scidb -c "./run.py make -j{}"'.format(self.build_threads))
 
-        log.info('6.3 N/A') # Local Development')
+        #log.info('6.3 Local Development')
         #self._execute(master, './run.py install -f')
 
         log.info('6.4 Cluster Development')
 
-        log.info('    * Package')
-        self._execute(master, 'su scidb -c "./run.py make_packages /tmp/packages -f"')
+        #log.info('    * Package')
+        #self._execute(master, 'su scidb -c "./run.py make_packages /tmp/packages -f"')
 
-        log.info('    * Distribute Libraries')
-        [self.pool.simple_job(self._distribute_libraries, (master, node), jobid=node.alias) for node in nodes]
-        self.pool.wait(len(nodes))
+        #log.info('    * Distribute Libraries')
+        #[self.pool.simple_job(self._distribute_libraries, (master, node), jobid=node.alias) for node in nodes]
+        #self.pool.wait(len(nodes))
 
         log.info('    * Install')
         self._execute(master, 'deployment/deploy.sh scidb_install /tmp/packages {}'.format(aliases))
 
-        log.info('    * Redistribute Deployment')
-        [self.pool.simple_job(self._copy_deployment, (master, node), jobid=node.alias) for node in nodes]
-        self.pool.wait(len(nodes))
+        #log.info('    * Redistribute Deployment')
+        #[self.pool.simple_job(self._copy_deployment, (master, node), jobid=node.alias) for node in nodes]
+        #self.pool.wait(len(nodes))
 
         log.info('    * Tweak Root SSH Configuration')
         self._set_root_ssh_config(master)
         log.info('    * Tweak Root SSH Permissions')
         master.ssh.execute('chmod 700 /root/.ssh')
         master.ssh.execute('chmod 600 /root/.ssh/*')
-        master.ssh.execute('''sed -i "s/scidb_prepare_node \\"/ssh root@\$\{{hostname\}} 'chmod 600 \/root\/.ssh\/\* \/home\/scidb\/.ssh\/*' \&\& scidb_prepare_node \\"/" {}/deployment/deploy.sh'''.format(self.directory))
+        #master.ssh.execute('''sed -i "s/scidb_prepare_node \\"/ssh root@\$\{{hostname\}} 'chmod 600 \/root\/.ssh\/\* \/home\/scidb\/.ssh\/*' \&\& scidb_prepare_node \\"/" {}/deployment/deploy.sh'''.format(self.directory))
 
         time.sleep(30)
 
@@ -199,8 +201,8 @@ class SciDBInstaller(DefaultClusterSetup):
         self.pool.wait(len(nodes))
 
         log.info('7   Start SciDB')
-        log.info('    * Initialize Catalogs')
-        self._execute(master, '/opt/scidb/14.8/bin/scidb.py initall mydb -f')
+        #log.info('    * Initialize Catalogs')
+        #self._execute(master, '/opt/scidb/14.8/bin/scidb.py initall mydb -f')
         log.info('    * Start All')
         self._execute(master, '/opt/scidb/14.8/bin/scidb.py startall mydb')
 
@@ -241,10 +243,12 @@ class SciDBInstaller(DefaultClusterSetup):
     def _add_environment(self, node, path):
         with node.ssh.remote_file(path, 'a') as descriptor:
             descriptor.write('export SCIDB_VER={}\n'.format(SCIDB_VERSION))
-            #descriptor.write('export SCIDB_INSTALL_PATH={}\n'.format(SCIDB_INSTALL_PATH))
-            #descriptor.write('export PATH=$SCIDB_INSTALL_PATH/bin:$PATH\n')
-            descriptor.write('export PATH={}/stage/install/bin:$PATH\n'.format(self.directory))
-            descriptor.write('export LD_LIBRARY_PATH={}/stage/install/lib:$LD_LIBRARY_PATH\n'.format(self.directory))
+            descriptor.write('export SCIDB_INSTALL_PATH={}\n'.format(SCIDB_INSTALL_PATH))
+            descriptor.write('export SCIDB_BUILD_PATH=$SCIDB_SOURCE_PATH/stage/build\n')
+            descriptor.write('export SCIDB_SOURCE_PATH={}'.format(self.directory))
+            descriptor.write('export PATH=$SCIDB_INSTALL_PATH/bin:$PATH\n')
+            #descriptor.write('export PATH={}/stage/install/bin:$PATH\n'.format(self.directory))
+            #descriptor.write('export LD_LIBRARY_PATH={}/stage/install/lib:$LD_LIBRARY_PATH\n'.format(self.directory))
             descriptor.write('export SCIDB_BUILD_TYPE={}\n'.format(self.build_type))
 
     def _ensure_revision(self, node):

@@ -130,7 +130,7 @@ class SciDBInstaller(DefaultClusterSetup):
         log.info('4.4 Coordinator')
         self._add_swapfile(master)
         self._execute(master, 'deployment/deploy.sh prepare_coordinator {}'.format(master.alias))
-        self._execute(master, 'deployment/deploy.sh prepare_chroot {} {}'.format(self.username, master.alias))
+        #self._execute(master, 'deployment/deploy.sh prepare_chroot {} {}'.format(self.username, master.alias))
 
         log.info('End SciDB node configuration')
 

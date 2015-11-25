@@ -5,6 +5,7 @@ import string
 from starcluster.clustersetup import DefaultClusterSetup
 from starcluster.exception import RemoteCommandFailed
 from starcluster.logger import log
+from starcluster.sshutils import 
 
 SCIDB_VERSION = 15.7
 SCIDB_REVISION = 8628
@@ -14,7 +15,7 @@ SCIDB_INSTALL_PATH = '/opt/scidb/$SCIDB_VER'
 DEFAULT_USERNAME = 'scidb'
 DEFAULT_REPOSITORY = 'https://github.com/suhailrehman/scidb.git'
 DEFAULT_BRANCH = None
-DEFAULT_SHIM_PACKAGE_URI = 'http://paradigm4.github.io/shim/ubuntu_14.04_shim_15.7_amd64.deb'
+DEFAULT_SHIM_PACKAGE_URI = 'https://s3.amazonaws.com/scidb-packages/shim_15.7_amd64.deb'
 DEFAULT_DIRECTORY = '/mnt/scidb'
 DEFAULT_CLIENTS = '0.0.0.0/0'
 DEFAULT_BUILD_TYPE = 'RelWithDebInfo'
@@ -39,6 +40,10 @@ REQUIRED_PACKAGES = ['build-essential', 'cmake', 'libboost1.48-all-dev',
                      'git-svn', 'gdebi'] # Shim uses gdebi
 
 class SciDBInstaller(DefaultClusterSetup):
+
+
+    master_user_pubkey = ""
+
     def __init__(self,
                  username=DEFAULT_USERNAME,
                  password=''.join(random.sample(string.lowercase+string.digits, 20)),
@@ -71,6 +76,11 @@ class SciDBInstaller(DefaultClusterSetup):
         log.info('*   Removing source deb http://www.cs.wisc.edu/condor/debian/development lenny contrib')
         node.ssh.execute('sed -i "s/deb http:\/\/www.cs.wisc.edu\/condor\/debian\/development lenny contrib/#deb http:\/\/www.cs.wisc.edu\/condor\/debian\/development lenny contrib/g" /etc/apt/sources.list')
 
+        log.info('*   Adding scidb user pubkey to root passwordless SSH')
+        node.ssh.execute('echo {} >> /root/.ssh/authorized_keys'.format(self.master_user_pubkey))
+
+        '''
+
         log.info('*   Adding SciDB directory "{}"'.format(self.directory))
         self._add_directory(node, self.directory)
         time.sleep(30)
@@ -80,6 +90,7 @@ class SciDBInstaller(DefaultClusterSetup):
 
         log.info('2.2 Configure and start the SSH server')
         node.ssh.execute('sudo service ssh restart')
+        '''
 
     def _set_ownership(self, master, node):
         log.info('*   Setting home directory owner to scidb on node {}'.format(node.alias))
@@ -98,93 +109,24 @@ class SciDBInstaller(DefaultClusterSetup):
         aliases = ' '.join(map(lambda node: node.alias, nodes))
 
         log.info('Beginning SciDB cluster configuration')
+        log.info('*   Allowing root passwordless ssh for the scidb user "{}"'.format(self.username))
 
-        log.info('*   Adding SciDB user "{}"'.format(self.username))
-        self._add_user(master, nodes)
-        time.sleep(90)
+        self.master_user_pubkey = master.ssh.execute('cat /home/{}/.ssh/id_rsa'.format(self.username))
 
-        [self.pool.simple_job(self._set_up_node, (master, node), jobid=node.alias) for node in nodes]
+        log.info('*   Public Key: '.format(self.master_user_pubkey))
+
+        #Install SciDB root key
+        self.pool.simple_job(self._set_up_node, (master, node), jobid=node.alias) for node in nodes]
         self.pool.wait(len(nodes))
+        
+        log.info('    * Install')
+        self._execute(master, 'deployment/deploy.sh scidb_install $HOME/scidb_packages {}'.format(aliases))
 
-        [self.pool.simple_job(self._set_ownership, (master, node), jobid=node.alias) for node in nodes]
-        self.pool.wait(len(nodes))
-
-        log.info('3   Cloning repository {}'.format(self.repository))
-        master.ssh.execute('cd {} && su scidb -c "git clone {} {} {}"'.format(
-            self.directory, self.repository, self.directory,
-            '--branch {}'.format(self.branch) if self.branch else ''))
-
-        # I guess the Paradigm4 source for Ubuntu 12.04 now requres HTTPS?
-        log.info('*   Fixing register_3rdparty_scidb_repository.sh')
-        master.ssh.execute('sed -i "s/http:\/\/downloads.paradigm4.com/https:\/\/downloads.paradigm4.com/g" {}/deployment/common/register_3rdparty_scidb_repository.sh'.format(self.directory))
-
-        #log.info('4.1 Configure passwordless SSH to all the cluster nodes')
-        #self._execute(master, '''su scidb -c "deployment/deploy.sh access scidb '{password}' '' {}"'''.format(aliases, password=self.password))
-
-        log.info('4.2 N/A')
-
-        log.info('4.3 Toolchain')
-        time.sleep(60)
-        self._execute(master, 'deployment/deploy.sh prepare_toolchain {}'.format(master.alias))
-
-        log.info('4.4 Coordinator')
-        self._add_swapfile(master)
-        self._execute(master, 'deployment/deploy.sh prepare_coordinator {}'.format(master.alias))
-        #self._execute(master, 'deployment/deploy.sh prepare_chroot {} {}'.format(self.username, master.alias))
-
-        log.info('End SciDB node configuration')
-
-        log.info('4.5 N/A')
-        log.info('4.6 N/A')
 
         log.info('5.1 Install Postgres')
         self._execute(master, 'deployment/deploy.sh prepare_postgresql postgres postgres {} {}'.format(
                  self.clients, master.alias))
 
-        log.info('5.2 Enable the postgres user to access scidb source code')
-        master.ssh.execute('sudo usermod -G scidb -a postgres')
-        master.ssh.execute('chmod -R g+rx {}'.format(self.directory))
-
-        log.info('6.1 Environment Variables')
-        self._add_environment(master, '/root/.bashrc')
-        self._add_environment(master, '/home/scidb/.bashrc')
-
-        log.info('6.2 Build')
-        #TODO can probably remove now that we've committed revision
-        #self._ensure_revision(master)
-        log.info('    * Setup')
-        self._execute(master, 'su scidb -c "./run.py setup -f"')
-        log.info('    * Build')
-        self._execute(master, 'su scidb -c "./run.py build_fast /tmp/packages -f"')
-        #self._execute(master, 'su scidb -c "./run.py make -j{}"'.format(self.build_threads))
-
-        #log.info('6.3 Local Development')
-        #self._execute(master, './run.py install -f')
-
-        log.info('6.4 Cluster Development')
-
-        #log.info('    * Package')
-        #self._execute(master, 'su scidb -c "./run.py make_packages /tmp/packages -f"')
-
-        #log.info('    * Distribute Libraries')
-        #[self.pool.simple_job(self._distribute_libraries, (master, node), jobid=node.alias) for node in nodes]
-        #self.pool.wait(len(nodes))
-
-        log.info('    * Install')
-        self._execute(master, 'deployment/deploy.sh scidb_install /tmp/packages {}'.format(aliases))
-
-        #log.info('    * Redistribute Deployment')
-        #[self.pool.simple_job(self._copy_deployment, (master, node), jobid=node.alias) for node in nodes]
-        #self.pool.wait(len(nodes))
-
-        log.info('    * Tweak Root SSH Configuration')
-        self._set_root_ssh_config(master)
-        log.info('    * Tweak Root SSH Permissions')
-        master.ssh.execute('chmod 700 /root/.ssh')
-        master.ssh.execute('chmod 600 /root/.ssh/*')
-        #master.ssh.execute('''sed -i "s/scidb_prepare_node \\"/ssh root@\$\{{hostname\}} 'chmod 600 \/root\/.ssh\/\* \/home\/scidb\/.ssh\/*' \&\& scidb_prepare_node \\"/" {}/deployment/deploy.sh'''.format(self.directory))
-
-        time.sleep(30)
 
         log.info('    * Prepare')
         self._execute(master, 'deployment/deploy.sh scidb_prepare scidb "{password}" mydb mydb mydb {directory}/db {instances} default {redundancy} {aliases}'.format(
@@ -194,17 +136,14 @@ class SciDBInstaller(DefaultClusterSetup):
                 directory=self.directory,
                 aliases=aliases))
 
-        log.info('*   Set Postgres Listener')
-        [self.pool.simple_job(self._set_postgres_listener, (node, '*'), jobid=node.alias) for node in nodes]
-        self.pool.wait(len(nodes))
-        [self.pool.simple_job(self._add_host_authentication, (node, 'host all all 0.0.0.0/0 md5'), jobid=node.alias) for node in nodes]
-        self.pool.wait(len(nodes))
 
         log.info('7   Start SciDB')
         #log.info('    * Initialize Catalogs')
         #self._execute(master, '/opt/scidb/14.8/bin/scidb.py initall mydb -f')
         log.info('    * Start All')
         self._execute(master, '/opt/scidb/14.8/bin/scidb.py startall mydb')
+
+
 
         log.info('A   Install Shim')
         self._execute(master, 'wget {}'.format(self.shim_uri))
@@ -215,7 +154,10 @@ class SciDBInstaller(DefaultClusterSetup):
         master.ssh.execute('pip install requests')
         master.ssh.execute('pip install --upgrade scidb-py')
 
+
         log.info('End SciDB cluster configuration')
+
+
 
     def _add_user(self, master, nodes):
         uid, gid = self._get_new_user_id(self.username)
@@ -292,6 +234,8 @@ class SciDBInstaller(DefaultClusterSetup):
         with node.ssh.remote_file(path.format(version=version), 'a') as descriptor:
             descriptor.write(authentication + '\n')
         node.ssh.execute('sudo service postgresql restart')
+
+    def _add_root_passwordless_ssh()
 
     def _execute(self, node, command):
         node.ssh.execute('cd {} && {}'.format(self.directory, command))

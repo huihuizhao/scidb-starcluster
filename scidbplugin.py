@@ -73,28 +73,8 @@ class SciDBInstaller(DefaultClusterSetup):
     def _set_up_node(self, master, node):
         log.info("1   Begin configuration {}".format(node.alias))
 
-        log.info('*   Removing source deb http://www.cs.wisc.edu/condor/debian/development lenny contrib')
-        node.ssh.execute('sed -i "s/deb http:\/\/www.cs.wisc.edu\/condor\/debian\/development lenny contrib/#deb http:\/\/www.cs.wisc.edu\/condor\/debian\/development lenny contrib/g" /etc/apt/sources.list')
-
         log.info('*   Adding scidb user pubkey to root passwordless SSH')
         node.ssh.execute('echo {} >> /root/.ssh/authorized_keys'.format(self.master_user_pubkey[0]))
-
-        #TODO: Include in image
-        log.info('2.1 Installing package - expect')
-        node.apt_install('expect')
-
-        '''
-
-        log.info('*   Adding SciDB directory "{}"'.format(self.directory))
-        self._add_directory(node, self.directory)
-        time.sleep(30)
-
-        log.info('2.1 Installing packages')
-        node.apt_install(' '.join(REQUIRED_PACKAGES))
-
-        log.info('2.2 Configure and start the SSH server')
-        node.ssh.execute('sudo service ssh restart')
-        '''
 
     def _set_ownership(self, master, node):
         log.info('*   Setting home directory owner to scidb on node {}'.format(node.alias))
@@ -115,8 +95,6 @@ class SciDBInstaller(DefaultClusterSetup):
         log.info('Beginning SciDB cluster configuration')
         log.info('*   Allowing root passwordless ssh for the scidb user "{}"'.format(self.username))
 
-
-
         self.master_user_pubkey = master.ssh.execute('cat /home/{}/.ssh/id_rsa.pub'.format(self.username))
 
         log.info('*   Public Key: '.format(self.master_user_pubkey))
@@ -126,15 +104,6 @@ class SciDBInstaller(DefaultClusterSetup):
         self.pool.wait(len(nodes))
 
         master.ssh.switch_user(user)        
-
-        log.info('    * Install')
-        self._execute    (master, 'cd {} && deployment/deploy.sh scidb_install /home/scidb/scidb_packages {}'.format(self.directory,aliases))
-
-
-        log.info('5.1 Install Postgres')
-        self._execute(master, 'deployment/deploy.sh prepare_postgresql postgres postgres {} {}'.format(
-                 self.clients, master.alias))
-
 
         log.info('    * Prepare')
         self._execute(master, 'deployment/deploy.sh scidb_prepare scidb "{password}" mydb mydb mydb {directory}/db {instances} default {redundancy} {aliases}'.format(
@@ -148,20 +117,11 @@ class SciDBInstaller(DefaultClusterSetup):
         log.info('7   Start SciDB')
         #log.info('    * Initialize Catalogs')
         #self._execute(master, '/opt/scidb/14.8/bin/scidb.py initall mydb -f')
-        log.info('    * Start All')
-        self._execute(master, 'scidb.py startall mydb')
+        log.info('    * Starting SciDB on all instances')
+        self._execute(master, '/opt/scidb/15.7/bin/scidb.py startall mydb')
 
-
-
-        log.info('A   Install Shim')
-        self._execute(master, 'wget {}'.format(self.shim_uri))
-        self._execute(master, 'ldconfig {}/stage/install/lib'.format(self.directory))
-        self._execute(master, 'gdebi --n shim*.deb')
-
-        log.info('B   Install SciDB-Py')
-        master.ssh.execute('pip install requests')
-        master.ssh.execute('pip install --upgrade scidb-py')
-
+        log.info('    * Starting Shim on Master')
+        self._execute(master, '/opt/scidb/15.7/bin/shim')
 
         log.info('End SciDB cluster configuration')
 

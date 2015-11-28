@@ -5,7 +5,7 @@ import string
 from starcluster.clustersetup import DefaultClusterSetup
 from starcluster.exception import RemoteCommandFailed
 from starcluster.logger import log
-from starcluster.sshutils import 
+
 
 SCIDB_VERSION = 15.7
 SCIDB_REVISION = 8628
@@ -16,7 +16,7 @@ DEFAULT_USERNAME = 'scidb'
 DEFAULT_REPOSITORY = 'https://github.com/suhailrehman/scidb.git'
 DEFAULT_BRANCH = None
 DEFAULT_SHIM_PACKAGE_URI = 'https://s3.amazonaws.com/scidb-packages/shim_15.7_amd64.deb'
-DEFAULT_DIRECTORY = '/mnt/scidb'
+DEFAULT_DIRECTORY = '/home/scidb/scidbtrunk'
 DEFAULT_CLIENTS = '0.0.0.0/0'
 DEFAULT_BUILD_TYPE = 'RelWithDebInfo'
 DEFAULT_BUILD_THREADS = 4
@@ -77,7 +77,11 @@ class SciDBInstaller(DefaultClusterSetup):
         node.ssh.execute('sed -i "s/deb http:\/\/www.cs.wisc.edu\/condor\/debian\/development lenny contrib/#deb http:\/\/www.cs.wisc.edu\/condor\/debian\/development lenny contrib/g" /etc/apt/sources.list')
 
         log.info('*   Adding scidb user pubkey to root passwordless SSH')
-        node.ssh.execute('echo {} >> /root/.ssh/authorized_keys'.format(self.master_user_pubkey))
+        node.ssh.execute('echo {} >> /root/.ssh/authorized_keys'.format(self.master_user_pubkey[0]))
+
+        #TODO: Include in image
+        log.info('2.1 Installing package - expect')
+        node.apt_install('expect')
 
         '''
 
@@ -111,16 +115,20 @@ class SciDBInstaller(DefaultClusterSetup):
         log.info('Beginning SciDB cluster configuration')
         log.info('*   Allowing root passwordless ssh for the scidb user "{}"'.format(self.username))
 
-        self.master_user_pubkey = master.ssh.execute('cat /home/{}/.ssh/id_rsa'.format(self.username))
+
+
+        self.master_user_pubkey = master.ssh.execute('cat /home/{}/.ssh/id_rsa.pub'.format(self.username))
 
         log.info('*   Public Key: '.format(self.master_user_pubkey))
 
         #Install SciDB root key
-        self.pool.simple_job(self._set_up_node, (master, node), jobid=node.alias) for node in nodes]
+        [self.pool.simple_job(self._set_up_node, (master, node), jobid=node.alias) for node in nodes]
         self.pool.wait(len(nodes))
-        
+
+        master.ssh.switch_user(user)        
+
         log.info('    * Install')
-        self._execute(master, 'deployment/deploy.sh scidb_install $HOME/scidb_packages {}'.format(aliases))
+        self._execute    (master, 'cd {} && deployment/deploy.sh scidb_install /home/scidb/scidb_packages {}'.format(self.directory,aliases))
 
 
         log.info('5.1 Install Postgres')
@@ -141,7 +149,7 @@ class SciDBInstaller(DefaultClusterSetup):
         #log.info('    * Initialize Catalogs')
         #self._execute(master, '/opt/scidb/14.8/bin/scidb.py initall mydb -f')
         log.info('    * Start All')
-        self._execute(master, '/opt/scidb/14.8/bin/scidb.py startall mydb')
+        self._execute(master, 'scidb.py startall mydb')
 
 
 
@@ -234,8 +242,6 @@ class SciDBInstaller(DefaultClusterSetup):
         with node.ssh.remote_file(path.format(version=version), 'a') as descriptor:
             descriptor.write(authentication + '\n')
         node.ssh.execute('sudo service postgresql restart')
-
-    def _add_root_passwordless_ssh()
 
     def _execute(self, node, command):
         node.ssh.execute('cd {} && {}'.format(self.directory, command))

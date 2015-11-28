@@ -13,7 +13,7 @@ class RegisterPluginDecorator(install):
         install.run(self)
 
         self.ensure_include(config_name, config_path)
-        self.set_keyname(os.path.join(config_path, config_name))
+        #self.set_keyname(os.path.join(config_path, config_name))
 
     def ensure_include(self, name, path, root='config'):
         filename = os.path.join(path, root)
@@ -55,7 +55,7 @@ class RegisterPluginDecorator(install):
 
     @staticmethod
     def set_keyname(path):
-        username = os.getenv("SUDO_USER") or getpass.getuser()
+        username = "scidbkey" #os.getenv("SUDO_USER") or getpass.getuser()
         config = RegisterPluginDecorator.get_config(path)
         config = config.replace('KEYNAME = AWSKey', 'KEYNAME = {}Key'.format(username))
         print 'Default AWS key is {}Key'.format(username)

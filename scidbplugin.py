@@ -21,6 +21,8 @@ DEFAULT_CLIENTS = '0.0.0.0/0'
 DEFAULT_BUILD_TYPE = 'RelWithDebInfo'
 DEFAULT_BUILD_THREADS = 4
 
+DEFAULT_DB_DIRECTORY = '/mnt/scidb'
+
 DEFAULT_REDUNDANCY = 0
 DEFAULT_INSTANCES_PER_NODE = 1
 
@@ -51,6 +53,7 @@ class SciDBInstaller(DefaultClusterSetup):
                  branch=DEFAULT_BRANCH,
                  shim_uri=DEFAULT_SHIM_PACKAGE_URI,
                  directory=DEFAULT_DIRECTORY,
+                 db_directory=DEFAULT_DB_DIRECTORY,
                  clients=DEFAULT_CLIENTS,
                  build_type=DEFAULT_BUILD_TYPE,
                  build_threads=DEFAULT_BUILD_THREADS,
@@ -69,6 +72,7 @@ class SciDBInstaller(DefaultClusterSetup):
         self.build_threads = build_threads
         self.redundancy = redundancy
         self.instances_per_node = instances_per_node
+        self.db_directory = db_directory
 
     def _set_up_node(self, master, node):
         log.info("1   Begin configuration {}".format(node.alias))
@@ -106,11 +110,11 @@ class SciDBInstaller(DefaultClusterSetup):
         master.ssh.switch_user(user)        
 
         log.info('    * Prepare')
-        self._execute(master, 'deployment/deploy.sh scidb_prepare scidb "{password}" mydb mydb mydb {directory}/db {instances} default {redundancy} {aliases}'.format(
+        self._execute(master, 'deployment/deploy.sh scidb_prepare scidb "{password}" mydb mydb mydb {db_directory}/db {instances} default {redundancy} {aliases}'.format(
                 instances=self.instances_per_node,
                 redundancy=self.redundancy,
                 password=self.password,
-                directory=self.directory,
+                db_directory=self.db_directory,
                 aliases=aliases))
 
 

@@ -72,7 +72,7 @@ class SciDBInstaller(DefaultClusterSetup):
         self.build_threads = build_threads
         self.redundancy = redundancy
         self.instances_per_node = instances_per_node
-        self.db_directory = db_directory
+        self.db_directoery = db_directory
 
     def _set_up_node(self, master, node):
         log.info("1   Begin configuration {}".format(node.alias))
